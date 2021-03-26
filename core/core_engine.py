@@ -2,6 +2,7 @@ from ecdsa import SigningKey, NIST384p, VerifyingKey
 import bigfloat
 import random
 import json
+import hashlib
 
 class PublicWallet:
     """ Public part of a wallet with only the public key to verify transaction """
@@ -153,8 +154,60 @@ class FullTransaction:
         assert htDict["type"] == "FullTransaction"
         return FullTransaction(HalfTransaction.jsonImport(ht_str), htDict["receiverSignature"])
 
-class Block:
-    pass
+class OpenBlock:
+    def __init__(self, blockId=None):
+        self.transactionList = []
+        self.blockId = blockId
+
+    def addTransaction(self, newTransaction):
+        self.transactionList.append(newTransaction)
+
+    def dictExport(self):
+        return {
+            "type": "OpenBlock",
+            "blockId": blockId,
+            "transactionlist": [t.dictExport() for t in self.transactionList]
+        }
+    def jsonExport(self):
+        return json.dumps(self.dictExport())
+
+    @property
+    def blockDigest(self):
+        digest = hashlib.sha256()
+        digest.update(self.jsonExport())
+        return digest.hexdigest()
+
+    @property
+    def blockChallenge(self):
+        """ build a Challenge specific to this block """
+        hexDigest = int(self.blockDigest, base=16)
+        startInput = bigfloat.BigFloat(hexDigest % 2**53 -1) * 2.0**-50
+        return Challenge(startInput=startInput)
+
+    def closeBlock(self, blockSignature, challengeReponse):
+        return ClosedBlock(self, blockSignature, challengeReponse)
+
+class ClosedBlock:
+    def __init__(self, block, blockSignature, challengeResponse):
+        self.block = block
+        self.blockSignature = blockSignature
+        self.challengeResponse = challengeResponse
+
+    def dictExport(self):
+        transcript = self.block.dictExport()
+        transcript.update({
+            "type": "ClosedBlock",
+            "signature": str(self.blockSignature),
+            "challengeResponse": self.challengeResponse.dictExport()
+        })
+        return transcript
+    def jsonExport(self):
+        return json.dumps(self.dictExport())
+
+    def verify(self):
+        validSignature = self.blockSignature == self.block.blockDigest
+        validResponse = self.block.blockChallenge.checkResponse(self.challengeReponse)
+        return validSignature and validResponse
 
 FUNC_MAP = {
     "exp2": bigfloat.exp2
@@ -164,10 +217,17 @@ REVERSE_FUNC_MAP = dict((FUNC_MAP[k], k) for k in FUNC_MAP)
 
 class Challenge:
     """ Hardest-to-round cases for arbitrary function, precision and bound """
-    def __init__(self, func=bigfloat.exp2, bound=2.0**-60, roundedPrecision=53, extendedPrecision=106):
+    def __init__(self,
+                 func=bigfloat.exp2,
+                 bound=2.0**-60,
+                 startInput=None,
+                 roundedPrecision=53,
+                 extendedPrecision=106):
 
         # considered function
         self.func = func
+        # input to start with when looking for hardest to round cases
+        self.startInput = startInput
         # target upper bound on the error
         self.bound = bound
         # destination format
@@ -181,6 +241,9 @@ class Challenge:
             "extendedPrecision": extendedPrecision,
             "func": REVERSE_FUNC_MAP[func],
         }
+
+    def dictExport(self):
+        return self.jsonCoding
 
     def jsonExport(self):
         return json.dumps(self.jsonCoding)
@@ -196,7 +259,8 @@ class Challenge:
             extendedPrecision=int(decode_dict["extendedPrecision"])
         )
 
-    def solve(self, localInput, watchdog=1000000):
+    def solve(self, watchdog=1000000):
+        localInput = self.startInput if not self.startInput is None else bigfloat.BigFloat(random.random())
         for _ in range(watchdog):
             delta = self.delta(localInput)
             if delta < self.bound:
@@ -209,6 +273,25 @@ class Challenge:
         extendedValue = self.func(localInput, context=self.extendedFormat)
         delta = abs(extendedValue - roundedValue) / roundedValue
         return delta
+
+    def checkResponse(self, response):
+        return self.delta(response) < self.bound
+
+class ChallengeResponse:
+    def __init__(self, challenge, response):
+        self.challenge = challenge
+        self.response = response
+
+    def dictExport(self):
+        transcript = self.challenge.dictExport()
+        transcript.update({
+            "type": "ChallengeResponse",
+            "response": response,
+        })
+        return transcript
+
+    def jsonExport(self):
+        return json.dumps(self.dictExport())
 
 if __name__ == "__main__":
     newWallet = Wallet.generateNewWallet()
@@ -224,7 +307,7 @@ if __name__ == "__main__":
     print(jsonExport)
     newChallenge = Challenge.jsonImport(jsonExport)
 
-    answer = newChallenge.solve(bigfloat.BigFloat(random.random()))
+    answer = newChallenge.solve() # bigfloat.BigFloat(random.random()))
     print(f"answer={answer}")
     print(f"delta={newChallenge.delta(answer)}")
 
