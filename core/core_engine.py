@@ -1,8 +1,10 @@
 from ecdsa import SigningKey, NIST384p, VerifyingKey
+import ecdsa
 import bigfloat
 import random
 import json
 import hashlib
+import collections
 
 class PublicWallet:
     """ Public part of a wallet with only the public key to verify transaction """
@@ -155,9 +157,12 @@ class FullTransaction:
         return FullTransaction(HalfTransaction.jsonImport(ht_str), htDict["receiverSignature"])
 
 class OpenBlock:
-    def __init__(self, blockId=None):
-        self.transactionList = []
+    """ on-going block gathering multiple transactions without having being
+        closed nor signed yet """
+    def __init__(self, blockId, previousBlockSignature, transactionList=None):
+        self.transactionList = [] if transactionList is None else transactionList
         self.blockId = blockId
+        self.previousBlockSignature = previousBlockSignature
 
     def addTransaction(self, newTransaction):
         self.transactionList.append(newTransaction)
@@ -166,7 +171,8 @@ class OpenBlock:
         return {
             "type": "OpenBlock",
             "blockId": blockId,
-            "transactionlist": [t.dictExport() for t in self.transactionList]
+            "previousBlockSignature": self.previousBlockSignature,
+            "transactionlist": [t.dictExport() for t in self.transactionList],
         }
     def jsonExport(self):
         return json.dumps(self.dictExport())
@@ -184,12 +190,23 @@ class OpenBlock:
         startInput = bigfloat.BigFloat(hexDigest % 2**53 -1) * 2.0**-50
         return Challenge(startInput=startInput)
 
-    def closeBlock(self, blockSignature, challengeReponse):
-        return ClosedBlock(self, blockSignature, challengeReponse)
+    def signBlock(self, validatorPrivateWallet):
+        return validatorPrivateWallet.sign(self.blockDigest)
+
+    def closeBlock(self, validatorSignature, blockSignature, challengeReponse):
+        return ClosedBlock(self, validatorSignature, blockSignature, challengeReponse)
+
+    @staticmethod
+    def dictImport(obDict):
+        assert obDict["type"] in ["ClosedBlock", "OpenBlock"]
+        return OpenBlock(obDict["blockId"],
+                         obDict["previousBlockSignature"],
+                         [Transaction.dictImport(t) for t in obDict["transactionList"]])
 
 class ClosedBlock:
-    def __init__(self, block, blockSignature, challengeResponse):
+    def __init__(self, block, validatorSignature, blockSignature, challengeResponse):
         self.block = block
+        self.validatorSignature = validatorSignature
         self.blockSignature = blockSignature
         self.challengeResponse = challengeResponse
 
@@ -197,17 +214,77 @@ class ClosedBlock:
         transcript = self.block.dictExport()
         transcript.update({
             "type": "ClosedBlock",
-            "signature": str(self.blockSignature),
+            "validatorSignature": str(self.validatorSignature),
+            "blockSignature": str(self.blockSignature),
             "challengeResponse": self.challengeResponse.dictExport()
         })
         return transcript
     def jsonExport(self):
         return json.dumps(self.dictExport())
 
+    @staticmethod
+    def dictImport(cbDict):
+        assert cbDict["type"] == "ClosedBlock"
+        return ClosedBlock(OpenBlock.dictImport(cbDict),
+                           cbDict["validatorSignature"],
+                           cbDict["blockSignature"],
+                           ChallengeResponse.dictImport(cbDict["challengeResponse"]))
+    @staticmethod
+    def jsonImport(cb_str):
+        return ClosedBlock.dictImport(json.loads(cb_str))
+
     def verify(self):
-        validSignature = self.blockSignature == self.block.blockDigest
+        validatorPublicWallet = PublicWallet(self.validatorSignature)
+        validSignature = validatorPublicWallet.verify(self.blockSignature, self.block.blockDigest)
         validResponse = self.block.blockChallenge.checkResponse(self.challengeReponse)
         return validSignature and validResponse
+
+class BlockChain:
+    VALIDATOR_REWARD = 1
+    def __init__(self):
+        self.rootDigest = 0x1337
+        self.blockList = []
+
+    def addBlock(self, newBlock):
+        self.blockList.append(newBlock)
+
+    def verifyChain(self):
+        previousSignature = self.rootDigest
+        for index, block in enumerate(self.blockList):
+            if not block.previousSignature == previousSignature:
+                print(f"[ERROR] block {index} previousSignature mismatch")
+                return False
+            if not block.verify():
+                print(f"[ERROR] block {index} could not be verified")
+                return False
+        return True
+
+    def dictExport(self):
+        return {
+            "type": "BlockChain",
+            "rootDigest": self.rootDigest,
+            "blockList": [b.dictExport() for b in self.blockList]
+        }
+    def jsonExport(self):
+        return json.dumps(self.dictExport())
+
+    @staticmethod
+    def jsonImport(bc_str):
+        bcDict = json.loads(bc_str)
+        assert bcDict["type"] == "BlockChain"
+        # TODO factorize rootDigest constant
+        assert bcDict["rootDigest"] == 0x1337
+        bc = BlockChain()
+
+
+    def countCoins(self):
+        walletMap = collections.defaultdict(0)
+        for index, block in enumerate(self.blockList):
+            for transaction in block.transactionList:
+                walletMap[transaction.sender] -= walletMap[transaction.amount]
+                walletMap[transaction.receiver] += walletMap[transaction.amount]
+            walletMap[block.validatorSignature] += BlockChain.VALIDATOR_REWARD
+        return walletMap
 
 FUNC_MAP = {
     "exp2": bigfloat.exp2
@@ -294,14 +371,17 @@ class ChallengeResponse:
         return json.dumps(self.dictExport())
 
 if __name__ == "__main__":
+    # Wallet generation
     newWallet = Wallet.generateNewWallet()
     message = b"hellow world.\n"
 
+    # Wallet sign & verify
     signature = newWallet.sign(message)
     print(signature)
     check = newWallet.verify(signature, message)
     print(newWallet.export())
 
+    # TMD challenge
     newChallenge = Challenge(bound=2.0**-60)
     jsonExport = newChallenge.jsonExport()
     print(jsonExport)
@@ -311,6 +391,7 @@ if __name__ == "__main__":
     print(f"answer={answer}")
     print(f"delta={newChallenge.delta(answer)}")
 
+    # Transaction signing and verification
     alice = Wallet.generateNewWallet()
     bob = Wallet.generateNewWallet()
     claire = Wallet.generateNewWallet()
@@ -324,5 +405,5 @@ if __name__ == "__main__":
     try:
         wrongTransaction = fullNewTransaction.verify(claire, bob)
         print(f"wrongTransaction={wrongTransaction}")
-    except:
+    except ecdsa.keys.BadSignatureError:
         print("failed to verify transaction")
