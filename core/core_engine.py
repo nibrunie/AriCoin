@@ -70,8 +70,8 @@ class UnsignedTransaction:
     """ Transaction of <amount> coin between sender and receiver signed
         by neither sender nor receiver """
     def __init__(self, sender, receiver, amount):
-        self.sender = bytes(sender)
-        self.receiver = bytes(receiver)
+        self.sender = sender
+        self.receiver = receiver
         self.amount = amount
 
     def dictExport(self):
@@ -87,8 +87,14 @@ class UnsignedTransaction:
     @staticmethod
     def jsonImport(ut_str):
         utDict = json.loads(ut_str)
+        return UnsignedTransaction.dictImport(utDict)
+
+    @staticmethod
+    def dictImport(utDict):
         assert utDict["type"] in ["UnsignedTransaction", "HalfTransaction", "FullTransaction"]
-        return UnsignedTransaction(utDict["sender"], utDict["receiver"], utDict["amount"])
+        return UnsignedTransaction(bytes(utDict["sender"], encoding='utf8'),
+                                   bytes(utDict["receiver"], encoding='utf8'),
+                                   utDict["amount"])
 
     def sign(self, privateWallet):
         transcript = bytes(self.jsonExport(), encoding='utf8')
@@ -134,8 +140,12 @@ class HalfTransaction:
     @staticmethod
     def jsonImport(ht_str):
         htDict = json.loads(ht_str)
+        return HalfTransaction.dictImport(htDict)
+
+    @staticmethod
+    def dictImport(htDict):
         assert htDict["type"] in ["HalfTransaction", "FullTransaction"]
-        return HalfTransaction(UnsignedTransaction.jsonImport(ht_str), htDict["senderSignature"])
+        return HalfTransaction(UnsignedTransaction.dictImport(htDict), htDict["senderSignature"])
 
 
 class FullTransaction:
@@ -173,8 +183,12 @@ class FullTransaction:
     @staticmethod
     def jsonImport(ft_str):
         ftDict = json.loads(ft_str)
-        assert htDict["type"] == "FullTransaction"
-        return FullTransaction(HalfTransaction.jsonImport(ht_str), htDict["receiverSignature"])
+        return FullTransaction.dictImport(ftDict)
+
+    @staticmethod
+    def dictImport(ftDict):
+        assert ftDict["type"] == "FullTransaction"
+        return FullTransaction(HalfTransaction.dictImport(ftDict), ftDict["receiverSignature"])
 
 class OpenBlock:
     """ on-going block gathering multiple transactions without having being
@@ -192,7 +206,7 @@ class OpenBlock:
             "type": "OpenBlock",
             "blockId": self.blockId,
             "previousBlockSignature": self.previousBlockSignature,
-            "transactionlist": [t.dictExport() for t in self.transactionList],
+            "transactionList": [t.dictExport() for t in self.transactionList],
         }
     def jsonExport(self):
         return json.dumps(self.dictExport())
@@ -221,7 +235,7 @@ class OpenBlock:
         assert obDict["type"] in ["ClosedBlock", "OpenBlock"]
         return OpenBlock(obDict["blockId"],
                          obDict["previousBlockSignature"],
-                         [Transaction.dictImport(t) for t in obDict["transactionList"]])
+                         [FullTransaction.dictImport(t) for t in obDict["transactionList"]])
 
 class ClosedBlock:
     def __init__(self, block, validatorSignature, blockSignature, challengeResponse):
@@ -236,7 +250,7 @@ class ClosedBlock:
             "type": "ClosedBlock",
             "validatorSignature": str(self.validatorSignature),
             "blockSignature": str(self.blockSignature),
-            "challengeResponse": self.challengeResponse.dictExport()
+            "challengeResponse": str(self.challengeResponse)
         })
         return transcript
     def jsonExport(self):
@@ -248,34 +262,44 @@ class ClosedBlock:
         return ClosedBlock(OpenBlock.dictImport(cbDict),
                            cbDict["validatorSignature"],
                            cbDict["blockSignature"],
-                           ChallengeResponse.dictImport(cbDict["challengeResponse"]))
+                           bigfloat.BigFloat(cbDict["challengeResponse"]))
     @staticmethod
     def jsonImport(cb_str):
         return ClosedBlock.dictImport(json.loads(cb_str))
 
-    def verify(self):
+    def verify(self, walletMap, validatorSignature):
         validatorPublicWallet = PublicWallet(self.validatorSignature)
         byteDigest = bytes(self.block.blockDigest, encoding='utf8')
         validSignature = validatorPublicWallet.verify(self.blockSignature, byteDigest)
         validResponse = self.block.blockChallenge.checkResponse(self.challengeResponse)
+        # checking transaction validity
+        for transaction in self.block.transactionList:
+            # verifying sender solvability
+            if walletMap[transaction.sender] < transaction.amount:
+                print(f"[ERROR] {transaction.sender} has no sufficient resources")
+                return False
+            walletMap[transaction.sender] -= transaction.amount
+            walletMap[transaction.receiver] += transaction.amount
+        walletMap[validatorSignature] += BlockChain.VALIDATOR_REWARD
         return validSignature and validResponse
 
 class BlockChain:
     VALIDATOR_REWARD = 1
-    def __init__(self):
+    def __init__(self, blockList=None):
         self.rootDigest = 0x1337
-        self.blockList = []
+        self.blockList = [] if blockList is None else blockList
 
     def addBlock(self, newBlock):
         self.blockList.append(newBlock)
 
     def verifyChain(self):
         previousSignature = self.rootDigest
+        walletMap = collections.defaultdict(lambda: 0)
         for index, closedBlock in enumerate(self.blockList):
             if not closedBlock.block.previousBlockSignature == previousSignature:
                 print(f"[ERROR] block {index} previousSignature mismatch")
                 return False
-            if not closedBlock.verify():
+            if not closedBlock.verify(walletMap, closedBlock.validatorSignature):
                 print(f"[ERROR] block {index} could not be verified")
                 return False
         return True
@@ -295,8 +319,7 @@ class BlockChain:
         assert bcDict["type"] == "BlockChain"
         # TODO factorize rootDigest constant
         assert bcDict["rootDigest"] == 0x1337
-        bc = BlockChain()
-
+        return BlockChain(blockList=[ClosedBlock.dictImport(cb) for cb in bcDict["blockList"]])
 
     def countCoins(self):
         walletMap = collections.defaultdict(lambda: 0)
@@ -417,7 +440,7 @@ if __name__ == "__main__":
     bob = Wallet.generateNewWallet()
     claire = Wallet.generateNewWallet()
 
-    newTransaction = UnsignedTransaction(alice.id, bob.id, 17)
+    newTransaction = UnsignedTransaction(alice.id, bob.id, 0)
     halfNewTransaction = newTransaction.sign(alice)
     fullNewTransaction = halfNewTransaction.sign(bob)
 
@@ -441,3 +464,10 @@ if __name__ == "__main__":
     print(f"aricCoin after one transaction wallets: {aricCoinChain.countCoins().items()}")
     print("verifying chain")
     print(aricCoinChain.verifyChain())
+
+    print("exporting blockchain")
+    exportedBlockChain = aricCoinChain.jsonExport()
+    print(exportedBlockChain)
+
+    print("importing blockchain")
+    print(BlockChain.jsonImport(exportedBlockChain))
