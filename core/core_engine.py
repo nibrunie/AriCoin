@@ -121,6 +121,16 @@ class HalfTransaction:
         transcript = bytes(self.unsignedTransaction.jsonExport(), encoding='utf8')
         return publicSenderWallet.verify(self.senderSignature, transcript)
 
+    @property
+    def sender(self):
+        return self.unsignedTransaction.sender
+    @property
+    def receiver(self):
+        return self.unsignedTransaction.receiver
+    @property
+    def amount(self):
+        return self.unsignedTransaction.amount
+
     @staticmethod
     def jsonImport(ht_str):
         htDict = json.loads(ht_str)
@@ -134,6 +144,16 @@ class FullTransaction:
     def __init__(self, halfTransaction, receiverSignature):
         self.halfTransaction = halfTransaction
         self.receiverSignature = receiverSignature
+
+    @property
+    def sender(self):
+        return self.halfTransaction.sender
+    @property
+    def receiver(self):
+        return self.halfTransaction.receiver
+    @property
+    def amount(self):
+        return self.halfTransaction.amount
 
     def dictExport(self):
         dictTranscript = self.halfTransaction.dictExport()
@@ -170,7 +190,7 @@ class OpenBlock:
     def dictExport(self):
         return {
             "type": "OpenBlock",
-            "blockId": blockId,
+            "blockId": self.blockId,
             "previousBlockSignature": self.previousBlockSignature,
             "transactionlist": [t.dictExport() for t in self.transactionList],
         }
@@ -180,7 +200,7 @@ class OpenBlock:
     @property
     def blockDigest(self):
         digest = hashlib.sha256()
-        digest.update(self.jsonExport())
+        digest.update(bytes(self.jsonExport(), encoding='utf8'))
         return digest.hexdigest()
 
     @property
@@ -191,7 +211,7 @@ class OpenBlock:
         return Challenge(startInput=startInput)
 
     def signBlock(self, validatorPrivateWallet):
-        return validatorPrivateWallet.sign(self.blockDigest)
+        return validatorPrivateWallet.sign(bytes(self.blockDigest, encoding='utf8'))
 
     def closeBlock(self, validatorSignature, blockSignature, challengeReponse):
         return ClosedBlock(self, validatorSignature, blockSignature, challengeReponse)
@@ -235,8 +255,9 @@ class ClosedBlock:
 
     def verify(self):
         validatorPublicWallet = PublicWallet(self.validatorSignature)
-        validSignature = validatorPublicWallet.verify(self.blockSignature, self.block.blockDigest)
-        validResponse = self.block.blockChallenge.checkResponse(self.challengeReponse)
+        byteDigest = bytes(self.block.blockDigest, encoding='utf8')
+        validSignature = validatorPublicWallet.verify(self.blockSignature, byteDigest)
+        validResponse = self.block.blockChallenge.checkResponse(self.challengeResponse)
         return validSignature and validResponse
 
 class BlockChain:
@@ -250,11 +271,11 @@ class BlockChain:
 
     def verifyChain(self):
         previousSignature = self.rootDigest
-        for index, block in enumerate(self.blockList):
-            if not block.previousSignature == previousSignature:
+        for index, closedBlock in enumerate(self.blockList):
+            if not closedBlock.block.previousBlockSignature == previousSignature:
                 print(f"[ERROR] block {index} previousSignature mismatch")
                 return False
-            if not block.verify():
+            if not closedBlock.verify():
                 print(f"[ERROR] block {index} could not be verified")
                 return False
         return True
@@ -278,12 +299,12 @@ class BlockChain:
 
 
     def countCoins(self):
-        walletMap = collections.defaultdict(0)
-        for index, block in enumerate(self.blockList):
-            for transaction in block.transactionList:
-                walletMap[transaction.sender] -= walletMap[transaction.amount]
-                walletMap[transaction.receiver] += walletMap[transaction.amount]
-            walletMap[block.validatorSignature] += BlockChain.VALIDATOR_REWARD
+        walletMap = collections.defaultdict(lambda: 0)
+        for index, closedBlock in enumerate(self.blockList):
+            for transaction in closedBlock.block.transactionList:
+                walletMap[transaction.sender] -= transaction.amount
+                walletMap[transaction.receiver] += transaction.amount
+            walletMap[closedBlock.validatorSignature] += BlockChain.VALIDATOR_REWARD
         return walletMap
 
 FUNC_MAP = {
@@ -407,3 +428,16 @@ if __name__ == "__main__":
         print(f"wrongTransaction={wrongTransaction}")
     except ecdsa.keys.BadSignatureError:
         print("failed to verify transaction")
+
+    # block-chain
+    aricCoinChain = BlockChain()
+    print(f"aricCoin init wallets: {aricCoinChain.countCoins().items()}")
+
+    firstBlock = OpenBlock(0, aricCoinChain.rootDigest)
+    firstBlock.addTransaction(fullNewTransaction)
+    # alice is signing the first block
+    aricCoinChain.addBlock(firstBlock.closeBlock(alice.id, firstBlock.signBlock(alice), firstBlock.blockChallenge.solve()))
+
+    print(f"aricCoin after one transaction wallets: {aricCoinChain.countCoins().items()}")
+    print("verifying chain")
+    print(aricCoinChain.verifyChain())
