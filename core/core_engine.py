@@ -77,8 +77,8 @@ class UnsignedTransaction:
     def dictExport(self):
         return {
             "type": "UnsignedTransaction",
-            "sender": str(self.sender),
-            "receiver": str(self.receiver),
+            "sender": bytesToStr(self.sender),
+            "receiver": bytesToStr(self.receiver),
             "amount": self.amount
         }
 
@@ -92,8 +92,8 @@ class UnsignedTransaction:
     @staticmethod
     def dictImport(utDict):
         assert utDict["type"] in ["UnsignedTransaction", "HalfTransaction", "FullTransaction"]
-        return UnsignedTransaction(bytes(utDict["sender"], encoding='utf8'),
-                                   bytes(utDict["receiver"], encoding='utf8'),
+        return UnsignedTransaction(strToBytes(utDict["sender"]),
+                                   strToBytes(utDict["receiver"]),
                                    utDict["amount"])
 
     def sign(self, privateWallet):
@@ -112,7 +112,7 @@ class HalfTransaction:
         dictTranscript = self.unsignedTransaction.dictExport()
         dictTranscript.update({
             "type": "HalfTransaction",
-            "senderSignature": str(self.senderSignature)
+            "senderSignature": bytesToStr(self.senderSignature),
         })
         return dictTranscript
     def jsonExport(self):
@@ -145,7 +145,8 @@ class HalfTransaction:
     @staticmethod
     def dictImport(htDict):
         assert htDict["type"] in ["HalfTransaction", "FullTransaction"]
-        return HalfTransaction(UnsignedTransaction.dictImport(htDict), htDict["senderSignature"])
+        return HalfTransaction(UnsignedTransaction.dictImport(htDict),
+                               strToBytes(htDict["senderSignature"]))
 
 
 class FullTransaction:
@@ -169,7 +170,7 @@ class FullTransaction:
         dictTranscript = self.halfTransaction.dictExport()
         dictTranscript.update({
             "type": "FullTransaction",
-            "receiverSignature": str(self.receiverSignature)
+            "receiverSignature": bytesToStr(self.receiverSignature),
         })
         return dictTranscript
     def jsonExport(self):
@@ -188,7 +189,8 @@ class FullTransaction:
     @staticmethod
     def dictImport(ftDict):
         assert ftDict["type"] == "FullTransaction"
-        return FullTransaction(HalfTransaction.dictImport(ftDict), ftDict["receiverSignature"])
+        return FullTransaction(HalfTransaction.dictImport(ftDict),
+                               strToBytes(ftDict["receiverSignature"]))
 
 class OpenBlock:
     """ on-going block gathering multiple transactions without having being
@@ -237,6 +239,11 @@ class OpenBlock:
                          obDict["previousBlockSignature"],
                          [FullTransaction.dictImport(t) for t in obDict["transactionList"]])
 
+def bytesToStr(rawBytes):
+    return rawBytes.hex()
+def strToBytes(raw_str):
+    return bytes.fromhex(raw_str)
+
 class ClosedBlock:
     def __init__(self, block, validatorSignature, blockSignature, challengeResponse):
         self.block = block
@@ -248,9 +255,9 @@ class ClosedBlock:
         transcript = self.block.dictExport()
         transcript.update({
             "type": "ClosedBlock",
-            "validatorSignature": str(self.validatorSignature),
-            "blockSignature": str(self.blockSignature),
-            "challengeResponse": str(self.challengeResponse)
+            "validatorSignature": bytesToStr(self.validatorSignature),
+            "blockSignature": bytesToStr(self.blockSignature),
+            "challengeResponse": str(self.challengeResponse),
         })
         return transcript
     def jsonExport(self):
@@ -260,9 +267,9 @@ class ClosedBlock:
     def dictImport(cbDict):
         assert cbDict["type"] == "ClosedBlock"
         return ClosedBlock(OpenBlock.dictImport(cbDict),
-                           cbDict["validatorSignature"],
-                           cbDict["blockSignature"],
-                           bigfloat.BigFloat(cbDict["challengeResponse"]))
+                           strToBytes(cbDict["validatorSignature"]),
+                           strToBytes(cbDict["blockSignature"]),
+                           bigfloat.BigFloat(cbDict["challengeResponse"], context=bigfloat.precision(53)))
     @staticmethod
     def jsonImport(cb_str):
         return ClosedBlock.dictImport(json.loads(cb_str))
@@ -281,6 +288,7 @@ class ClosedBlock:
             walletMap[transaction.sender] -= transaction.amount
             walletMap[transaction.receiver] += transaction.amount
         walletMap[validatorSignature] += BlockChain.VALIDATOR_REWARD
+        print(f"validSignature={validSignature}, validResponse={validResponse}")
         return validSignature and validResponse
 
 class BlockChain:
@@ -450,7 +458,7 @@ if __name__ == "__main__":
         wrongTransaction = fullNewTransaction.verify(claire, bob)
         print(f"wrongTransaction={wrongTransaction}")
     except ecdsa.keys.BadSignatureError:
-        print("failed to verify transaction")
+        print("failed to verify transaction (expected failure)")
 
     # block-chain
     aricCoinChain = BlockChain()
@@ -470,4 +478,6 @@ if __name__ == "__main__":
     print(exportedBlockChain)
 
     print("importing blockchain")
-    print(BlockChain.jsonImport(exportedBlockChain))
+    importedChain = BlockChain.jsonImport(exportedBlockChain)
+    print(importedChain.jsonExport())
+    print(importedChain.verifyChain())
