@@ -66,7 +66,20 @@ class Wallet(PublicWallet):
         return Wallet(sk_string)
 
 
-class UnsignedTransaction:
+class JsonTranslatable:
+    """ Helper class to factorize dictImport/jsonImport
+        and dictExport/jsonExport """
+    def jsonExport(self):
+        return json.dumps(self.dictExport())
+    @classmethod
+    def jsonImport(cls, json_str):
+        pyDict = json.loads(json_str)
+        return cls.dictImport(pyDict)
+
+    def dictExport(self):
+        raise NotImplementedError
+
+class UnsignedTransaction(JsonTranslatable):
     """ Transaction of <amount> coin between sender and receiver signed
         by neither sender nor receiver """
     def __init__(self, sender, receiver, amount):
@@ -82,13 +95,6 @@ class UnsignedTransaction:
             "amount": self.amount
         }
 
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
-    @staticmethod
-    def jsonImport(ut_str):
-        utDict = json.loads(ut_str)
-        return UnsignedTransaction.dictImport(utDict)
-
     @staticmethod
     def dictImport(utDict):
         assert utDict["type"] in ["UnsignedTransaction", "HalfTransaction", "FullTransaction"]
@@ -101,7 +107,7 @@ class UnsignedTransaction:
         signature = privateWallet.sign(transcript)
         return HalfTransaction(self, signature)
 
-class HalfTransaction:
+class HalfTransaction(JsonTranslatable):
     """ Transaction of <amount> coin between sender and receiver signed
         by sender only """
     def __init__(self, unsignedTransaction, senderSignature):
@@ -115,8 +121,6 @@ class HalfTransaction:
             "senderSignature": bytesToStr(self.senderSignature),
         })
         return dictTranscript
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
     def sign(self, privateWallet):
         transcript = bytes(self.jsonExport(), encoding='utf8')
         signature = privateWallet.sign(transcript)
@@ -138,18 +142,12 @@ class HalfTransaction:
         return self.unsignedTransaction.amount
 
     @staticmethod
-    def jsonImport(ht_str):
-        htDict = json.loads(ht_str)
-        return HalfTransaction.dictImport(htDict)
-
-    @staticmethod
     def dictImport(htDict):
         assert htDict["type"] in ["HalfTransaction", "FullTransaction"]
         return HalfTransaction(UnsignedTransaction.dictImport(htDict),
                                strToBytes(htDict["senderSignature"]))
 
-
-class FullTransaction:
+class FullTransaction(JsonTranslatable):
     """ Transaction of <amount> coin between sender and receiver signed
         by both sender and receiver """
     def __init__(self, halfTransaction, receiverSignature):
@@ -173,8 +171,6 @@ class FullTransaction:
             "receiverSignature": bytesToStr(self.receiverSignature),
         })
         return dictTranscript
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
 
     def verify(self, publicSenderWallet, publicReceiverWallet):
         """ verify the validity of the sender signature """
@@ -182,17 +178,12 @@ class FullTransaction:
         return publicReceiverWallet.verify(self.receiverSignature, transcript) and self.halfTransaction.verify(publicSenderWallet)
 
     @staticmethod
-    def jsonImport(ft_str):
-        ftDict = json.loads(ft_str)
-        return FullTransaction.dictImport(ftDict)
-
-    @staticmethod
     def dictImport(ftDict):
         assert ftDict["type"] == "FullTransaction"
         return FullTransaction(HalfTransaction.dictImport(ftDict),
                                strToBytes(ftDict["receiverSignature"]))
 
-class OpenBlock:
+class OpenBlock(JsonTranslatable):
     """ on-going block gathering multiple transactions without having being
         closed nor signed yet """
     def __init__(self, blockId, previousBlockSignature, transactionList=None):
@@ -210,8 +201,6 @@ class OpenBlock:
             "previousBlockSignature": self.previousBlockSignature,
             "transactionList": [t.dictExport() for t in self.transactionList],
         }
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
 
     @property
     def blockDigest(self):
@@ -240,11 +229,15 @@ class OpenBlock:
                          [FullTransaction.dictImport(t) for t in obDict["transactionList"]])
 
 def bytesToStr(rawBytes):
+    """ convert bytes to str such that strToBytes can
+        convert it back to bytes properly """
     return rawBytes.hex()
 def strToBytes(raw_str):
+    """ convert str to bytes after bytesToStr conversion to return
+        the original bytes content """
     return bytes.fromhex(raw_str)
 
-class ClosedBlock:
+class ClosedBlock(JsonTranslatable):
     def __init__(self, block, validatorSignature, blockSignature, challengeResponse):
         self.block = block
         self.validatorSignature = validatorSignature
@@ -260,8 +253,6 @@ class ClosedBlock:
             "challengeResponse": str(self.challengeResponse),
         })
         return transcript
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
 
     @staticmethod
     def dictImport(cbDict):
@@ -270,9 +261,6 @@ class ClosedBlock:
                            strToBytes(cbDict["validatorSignature"]),
                            strToBytes(cbDict["blockSignature"]),
                            bigfloat.BigFloat(cbDict["challengeResponse"], context=bigfloat.precision(53)))
-    @staticmethod
-    def jsonImport(cb_str):
-        return ClosedBlock.dictImport(json.loads(cb_str))
 
     def verify(self, walletMap, validatorSignature):
         validatorPublicWallet = PublicWallet(self.validatorSignature)
@@ -291,7 +279,7 @@ class ClosedBlock:
         print(f"validSignature={validSignature}, validResponse={validResponse}")
         return validSignature and validResponse
 
-class BlockChain:
+class BlockChain(JsonTranslatable):
     VALIDATOR_REWARD = 1
     def __init__(self, blockList=None):
         self.rootDigest = 0x1337
@@ -318,15 +306,12 @@ class BlockChain:
             "rootDigest": self.rootDigest,
             "blockList": [b.dictExport() for b in self.blockList]
         }
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
 
     @staticmethod
-    def jsonImport(bc_str):
-        bcDict = json.loads(bc_str)
+    def dictImport(bcDict):
         assert bcDict["type"] == "BlockChain"
-        # TODO factorize rootDigest constant
         assert bcDict["rootDigest"] == 0x1337
+        # TODO factorize rootDigest constant
         return BlockChain(blockList=[ClosedBlock.dictImport(cb) for cb in bcDict["blockList"]])
 
     def countCoins(self):
@@ -344,7 +329,7 @@ FUNC_MAP = {
 
 REVERSE_FUNC_MAP = dict((FUNC_MAP[k], k) for k in FUNC_MAP)
 
-class Challenge:
+class Challenge(JsonTranslatable):
     """ Hardest-to-round cases for arbitrary function, precision and bound """
     def __init__(self,
                  func=bigfloat.exp2,
@@ -374,18 +359,14 @@ class Challenge:
     def dictExport(self):
         return self.jsonCoding
 
-    def jsonExport(self):
-        return json.dumps(self.jsonCoding)
-
     @staticmethod
-    def jsonImport(enc_str):
-        decode_dict = json.loads(enc_str)
-        assert decode_dict["type"] == "challenge"
+    def dictImport(cDict):
+        assert cDict["type"] == "challenge"
         return Challenge(
-            func=FUNC_MAP[decode_dict["func"]],
-            bound=float(decode_dict["bound"]),
-            roundedPrecision=int(decode_dict["roundedPrecision"]),
-            extendedPrecision=int(decode_dict["extendedPrecision"])
+            func=FUNC_MAP[cDict["func"]],
+            bound=float(cDict["bound"]),
+            roundedPrecision=int(cDict["roundedPrecision"]),
+            extendedPrecision=int(cDict["extendedPrecision"])
         )
 
     def solve(self, watchdog=1000000):
