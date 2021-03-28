@@ -1,4 +1,3 @@
-from ecdsa import SigningKey, NIST384p, VerifyingKey
 import ecdsa
 import bigfloat
 import random
@@ -6,78 +5,9 @@ import json
 import hashlib
 import collections
 
-class PublicWallet:
-    """ Public part of a wallet with only the public key to verify transaction """
-    def __init__(self, vk_string):
-        self.vk = VerifyingKey.from_string(vk_string, curve=NIST384p)
+from core.wallet import PublicWallet, Wallet
+from core.utils import JsonTranslatable, strToBytes, bytesToStr
 
-    def verify(self, signature, msg):
-        return self.vk.verify(signature, msg)
-
-    def export(self):
-        return self.vk.to_string()
-
-    def jsonExport(self):
-        return json.dumps({
-            "type": "publicWallet",
-            "vk_string": self.export()
-        })
-
-    @property
-    def id(self):
-        return self.export()
-
-    @staticmethod
-    def jsonImport(pw_str):
-        pw_dict = json.loads(pw_str)
-        assert pw_dict["type"] == "publicWallet"
-        return PublicWallet(pw_dict["vk_string"])
-
-class Wallet(PublicWallet):
-    """ Coin wallet with a pair private,public key to sign (and verify)
-        transaction """
-    def __init__(self, sk_string):
-        sk = SigningKey.from_string(sk_string, curve=NIST384p)
-        PublicWallet.__init__(self, sk.verifying_key.to_string())
-        self.sk = sk
-
-    def sign(self, msg):
-        signature = self.sk.sign(msg)
-        return signature
-
-    #def verify(self, signature, msg):
-    #    vk = self.sk.verifying_key
-    #    return vk.verify(signature, msg)
-
-    def privateExport(self):
-        return self.sk.to_string()
-
-    @property
-    def privateId(self):
-        return self.privateExport()
-
-    def extractPublicWallet(self):
-        return PublicWallet(self.sk.verifying_key.to_string())
-
-    @staticmethod
-    def generateNewWallet():
-        sk = SigningKey.generate(curve=NIST384p)
-        sk_string = sk.to_string()
-        return Wallet(sk_string)
-
-
-class JsonTranslatable:
-    """ Helper class to factorize dictImport/jsonImport
-        and dictExport/jsonExport """
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
-    @classmethod
-    def jsonImport(cls, json_str):
-        pyDict = json.loads(json_str)
-        return cls.dictImport(pyDict)
-
-    def dictExport(self):
-        raise NotImplementedError
 
 class UnsignedTransaction(JsonTranslatable):
     """ Transaction of <amount> coin between sender and receiver signed
@@ -228,16 +158,8 @@ class OpenBlock(JsonTranslatable):
                          obDict["previousBlockSignature"],
                          [FullTransaction.dictImport(t) for t in obDict["transactionList"]])
 
-def bytesToStr(rawBytes):
-    """ convert bytes to str such that strToBytes can
-        convert it back to bytes properly """
-    return rawBytes.hex()
-def strToBytes(raw_str):
-    """ convert str to bytes after bytesToStr conversion to return
-        the original bytes content """
-    return bytes.fromhex(raw_str)
-
 class ClosedBlock(JsonTranslatable):
+    """ Signed block from the blockchain """
     def __init__(self, block, validatorSignature, blockSignature, challengeResponse):
         self.block = block
         self.validatorSignature = validatorSignature
@@ -263,6 +185,9 @@ class ClosedBlock(JsonTranslatable):
                            bigfloat.BigFloat(cbDict["challengeResponse"], context=bigfloat.precision(53)))
 
     def verify(self, walletMap, validatorSignature):
+        """ verify the validity of the block
+            - check that transaction amounts are compatible with known account values
+            - check that transaction blocks has been properly validated """
         validatorPublicWallet = PublicWallet(self.validatorSignature)
         byteDigest = bytes(self.block.blockDigest, encoding='utf8')
         validSignature = validatorPublicWallet.verify(self.blockSignature, byteDigest)
@@ -280,6 +205,7 @@ class ClosedBlock(JsonTranslatable):
         return validSignature and validResponse
 
 class BlockChain(JsonTranslatable):
+    """ Block-chain component """
     VALIDATOR_REWARD = 1
     def __init__(self, blockList=None):
         self.rootDigest = 0x1337
