@@ -3,7 +3,7 @@ import json
 
 from .utils import JsonTranslatable, strToBytes, bytesToStr
 
-class PublicWallet:
+class PublicWallet(JsonTranslatable):
     """ Public part of a wallet with only the public key.
         It can only be used to verify transaction """
     def __init__(self, vk_string):
@@ -13,30 +13,25 @@ class PublicWallet:
         """ check that signature for msg is valid """
         return self.vk.verify(signature, msg)
 
-    def export(self):
+    def export(self) -> bytes:
         return self.vk.to_string()
 
-    def jsonExport(self):
-        return json.dumps({
+    def dictExport(self):
+        return {
             "type": "PublicWallet",
             "vk_string": bytesToStr(self.export())
-        })
+        }
 
     @property
-    def id(self):
+    def id(self) -> bytes:
         return self.export()
-
-    @staticmethod
-    def jsonImport(pw_str):
-        pw_dict = json.loads(pw_str)
-        return PublicWallet.dictImport(pw_dict)
 
     @staticmethod
     def dictImport(pwDict):
         assert pwDict["type"] in ["PublicWallet", "Wallet"]
         return PublicWallet(strToBytes(pwDict["vk_string"]))
 
-class Wallet(PublicWallet, JsonTranslatable):
+class Wallet(PublicWallet):
     """ Coin wallet with a pair private,public key to sign (and verify)
         transaction """
     def __init__(self, sk_string):
@@ -49,7 +44,7 @@ class Wallet(PublicWallet, JsonTranslatable):
         signature = self.sk.sign(msg)
         return signature
 
-    def privateExport(self):
+    def privateExport(self) -> bytes:
         return self.sk.to_string()
 
     @property
