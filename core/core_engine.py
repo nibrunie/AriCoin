@@ -178,7 +178,7 @@ class ClosedBlock(JsonTranslatable):
             "type": "ClosedBlock",
             "validatorSignature": bytesToStr(self.validatorSignature),
             "blockSignature": bytesToStr(self.blockSignature),
-            "challengeResponse": str(self.challengeResponse),
+            "challengeResponse": self.challengeResponse.dictExport(),
         })
         return transcript
 
@@ -188,7 +188,7 @@ class ClosedBlock(JsonTranslatable):
         return ClosedBlock(OpenBlock.dictImport(cbDict),
                            strToBytes(cbDict["validatorSignature"]),
                            strToBytes(cbDict["blockSignature"]),
-                           bigfloat.BigFloat(cbDict["challengeResponse"], context=bigfloat.precision(53)))
+                           ChallengeResponse.dictImport(cbDict["challengeResponse"]))
 
     def verify(self, walletMap, validatorSignature):
         """ verify the validity of the block
@@ -197,7 +197,7 @@ class ClosedBlock(JsonTranslatable):
         validatorPublicWallet = PublicWallet(self.validatorSignature)
         byteDigest = bytes(self.block.blockDigest, encoding='utf8')
         validSignature = validatorPublicWallet.verify(self.blockSignature, byteDigest)
-        validResponse = self.block.blockChallenge.checkResponse(self.challengeResponse)
+        validResponse = self.block.blockChallenge.checkResponse(self.challengeResponse.response)
         # checking transaction validity
         for transaction in self.block.transactionList:
             # verifying sender solvability
@@ -289,8 +289,8 @@ class Challenge(JsonTranslatable):
         self.roundedFormat = bigfloat.precision(roundedPrecision)
         # arbitrary-precision format
         self.extendedFormat = bigfloat.precision(extendedPrecision)
-        self.jsonCoding = {
-            "type": "challenge",
+        self.staticDict = {
+            "type": "Challenge",
             "bound": bound,
             "roundedPrecision": roundedPrecision,
             "extendedPrecision": extendedPrecision,
@@ -298,11 +298,11 @@ class Challenge(JsonTranslatable):
         }
 
     def dictExport(self):
-        return self.jsonCoding
+        return self.staticDict
 
     @staticmethod
     def dictImport(cDict):
-        assert cDict["type"] == "challenge"
+        assert cDict["type"] in ["Challenge", "ChallengeResponse"]
         return Challenge(
             func=FUNC_MAP[cDict["func"]],
             bound=float(cDict["bound"]),
@@ -315,7 +315,7 @@ class Challenge(JsonTranslatable):
         for _ in range(watchdog):
             delta = self.delta(localInput)
             if delta < self.bound:
-                return localInput
+                return ChallengeResponse(self, localInput)
             localInput = bigfloat.next_up(localInput, context=self.roundedFormat)
         return None
 
@@ -325,10 +325,10 @@ class Challenge(JsonTranslatable):
         delta = abs(extendedValue - roundedValue) / roundedValue
         return delta
 
-    def checkResponse(self, response):
+    def checkResponse(self, response: bigfloat.BigFloat):
         return self.delta(response) < self.bound
 
-class ChallengeResponse:
+class ChallengeResponse(JsonTranslatable):
     def __init__(self, challenge, response):
         self.challenge = challenge
         self.response = response
@@ -337,12 +337,15 @@ class ChallengeResponse:
         transcript = self.challenge.dictExport()
         transcript.update({
             "type": "ChallengeResponse",
-            "response": response,
+            "response": str(self.response),
         })
         return transcript
+    @staticmethod
+    def dictImport(crDict):
+        # TODO/FIXME: response precision should be parametrizable
+        return ChallengeResponse(Challenge.dictImport(crDict),
+                                 bigfloat.BigFloat(crDict["response"], context=bigfloat.precision(53)))
 
-    def jsonExport(self):
-        return json.dumps(self.dictExport())
 
 if __name__ == "__main__":
     # Wallet generation
@@ -363,7 +366,7 @@ if __name__ == "__main__":
 
     answer = newChallenge.solve() # bigfloat.BigFloat(random.random()))
     print(f"answer={answer}")
-    print(f"delta={newChallenge.delta(answer)}")
+    print(f"delta={newChallenge.delta(answer.response)}")
 
     # Transaction signing and verification
     alice = Wallet.generateNewWallet()
