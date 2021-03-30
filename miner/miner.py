@@ -44,6 +44,15 @@ class RootController(TGController):
     def blockchain(self):
         return self.blockChain.jsonExport()
 
+    @expose(content_type="text/plain")
+    def tmd(self):
+        text = ""
+        for block in self.blockChain.blockList:
+            challenge = block.challengeResponse
+            desc = challenge.challenge.staticDict
+            text += (f"|{desc['func']}_rnd{desc['roundedPrecision']}({challenge.response}) - {challenge.responseImage}| <= {desc['bound']}\n")
+        return text
+
     @expose(content_type="text/json")
     def transfer_coin(self, sender=None,
                       receiver=None,
