@@ -149,8 +149,8 @@ class OpenBlock(JsonTranslatable):
     def signBlock(self, validatorPrivateWallet):
         return validatorPrivateWallet.sign(bytes(self.blockDigest, encoding='utf8'))
 
-    def closeBlock(self, validatorSignature, blockSignature, challengeReponse):
-        return ClosedBlock(self, validatorSignature, blockSignature, challengeReponse)
+    def closeBlock(self, validatorSignature, blockSignature, challengeResponse):
+        return ClosedBlock(self, validatorSignature, blockSignature, challengeResponse)
 
     @staticmethod
     def dictImport(obDict):
@@ -220,9 +220,9 @@ class BlockChain(JsonTranslatable):
         # top of stack (open) block
         self.lastOpenBlock = OpenBlock(0, self.rootDigest) if lastOpenBlock is None else lastOpenBlock
 
-    def closeBlock(self, validatorSignature, blockSignature, challengeReponse):
+    def closeBlock(self, validatorSignature, blockSignature, challengeResponse):
         """ add a closed block to the list """
-        lastBlock = self.lastOpenBlock.closeBlock(validatorSignature, blockSignature, challengeReponse)
+        lastBlock = self.lastOpenBlock.closeBlock(validatorSignature, blockSignature, challengeResponse)
         self.blockList.append(lastBlock)
         # creating a new and open last block
         self.lastOpenBlock = OpenBlock(lastBlock.blockId + 1, lastBlock.blockSignature)
@@ -313,9 +313,9 @@ class Challenge(JsonTranslatable):
     def solve(self, watchdog=1000000):
         localInput = self.startInput if not self.startInput is None else bigfloat.BigFloat(random.random())
         for _ in range(watchdog):
-            delta = self.delta(localInput)
+            roundedValue, delta = self.delta(localInput)
             if delta < self.bound:
-                return ChallengeResponse(self, localInput)
+                return ChallengeResponse(self, localInput, roundedValue)
             localInput = bigfloat.next_up(localInput, context=self.roundedFormat)
         return None
 
@@ -323,28 +323,33 @@ class Challenge(JsonTranslatable):
         roundedValue = self.func(localInput, context=self.roundedFormat)
         extendedValue = self.func(localInput, context=self.extendedFormat)
         delta = abs(extendedValue - roundedValue) / roundedValue
-        return delta
+        return roundedValue, delta
 
     def checkResponse(self, response: bigfloat.BigFloat):
-        return self.delta(response) < self.bound
+        roundedValue, delta = self.delta(response)
+        return delta < self.bound
 
 class ChallengeResponse(JsonTranslatable):
-    def __init__(self, challenge, response):
+    def __init__(self, challenge, response, responseImage):
         self.challenge = challenge
         self.response = response
+        # func(response) = responseImage
+        self.responseImage = responseImage
 
     def dictExport(self):
         transcript = self.challenge.dictExport()
         transcript.update({
             "type": "ChallengeResponse",
             "response": str(self.response),
+            "responseImage": str(self.responseImage),
         })
         return transcript
     @staticmethod
     def dictImport(crDict):
         # TODO/FIXME: response precision should be parametrizable
         return ChallengeResponse(Challenge.dictImport(crDict),
-                                 bigfloat.BigFloat(crDict["response"], context=bigfloat.precision(53)))
+                                 bigfloat.BigFloat(crDict["response"], context=bigfloat.precision(53)),
+                                 bigfloat.BigFloat(crDict["responseImage"], context=bigfloat.precision(53)))
 
 
 if __name__ == "__main__":
@@ -366,7 +371,7 @@ if __name__ == "__main__":
 
     answer = newChallenge.solve() # bigfloat.BigFloat(random.random()))
     print(f"answer={answer}")
-    print(f"delta={newChallenge.delta(answer.response)}")
+    print(f"roundedValue, delta={newChallenge.delta(answer.response)}")
 
     # Transaction signing and verification
     alice = Wallet.generateNewWallet()
