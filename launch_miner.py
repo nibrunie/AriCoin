@@ -10,13 +10,16 @@ if __name__ == "__main__":
     parser.add_argument("--load-blockchain", action="store", type=str,
                         default=None,
                         help="input file for stored blockchain state")
+    parser.add_argument("--miner-id", action="store", type=str,
+                        default=None,
+                        help="miner identity file (private id)")
 
     args = parser.parse_args()
 
     # Configure a new minimal application with our root controller.
     config = MinimalApplicationConfigurator()
     config.update_blueprint({
-        'root_controller': RootController(args.load_blockchain)
+        'root_controller': RootController(args.load_blockchain, args.miner_id)
     })
 
     # Serve the newly configured web application.

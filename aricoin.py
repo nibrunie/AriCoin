@@ -1,7 +1,10 @@
 import argparse
+import requests
 
 from core.wallet import Wallet, PublicWallet
-from core.core_engine import UnsignedTransaction, HalfTransaction
+from core.core_engine import (
+    UnsignedTransaction, HalfTransaction, FullTransaction,
+    BlockChain)
 
 
 def generate_wallet(args):
@@ -12,6 +15,13 @@ def generate_wallet(args):
     if args.output:
         with open(args.output, "w") as outStream:
             outStream.write(walletJson)
+
+def generate_empty_blockchain(args):
+    newBlockChain = BlockChain()
+    blockChainExport = newBlockChain.jsonExport()
+    print(blockChainExport)
+    with open(args.output, "w") as outStream:
+        outStream.write(blockChainExport)
 
 def transfer_coin(args):
     """ initiate a two-sided coin transfer """
@@ -49,6 +59,13 @@ def receive_coin(args):
             print(jsonFullTransaction)
             with open(args.output, "w") as fullTransactionStream:
                 fullTransactionStream.write(jsonFullTransaction)
+
+def submit_transaction(args):
+    """ submit a new transaction to a miner for validation """
+    with open(args.transaction, "r") as transactionStream:
+        transaction = FullTransaction.jsonImport(transactionStream.read())
+        answer = requests.get(f"{args.miner_url}/transfer_coin", params=transaction.dictExport()) 
+        print(f"server responded with:\n{answer.text}")
         
 
 if __name__ == "__main__":
@@ -61,6 +78,7 @@ if __name__ == "__main__":
                                         help='output file')
     parser_generate_wallet.set_defaults(func=generate_wallet)
 
+    # transfering coin (from sender)
     parser_transfer_coin = subparsers.add_parser('transfer_coin', help='sign a transaction')
     parser_transfer_coin.add_argument('receiver', action='store',
                                   help='transaction receiver')
@@ -72,12 +90,14 @@ if __name__ == "__main__":
                                   help='output file')
     parser_transfer_coin.set_defaults(func=transfer_coin)
 
+    # generate public-id from private-id target
     parser_generate_public_id = subparsers.add_parser('generate_public_id', help='generating the public version of a private wallet')
     parser_generate_public_id.add_argument('wallet', action='store', help='private wallet file')
     parser_generate_public_id.add_argument('output', action='store', default=None,
                                         help='output file')
     parser_generate_public_id.set_defaults(func=generate_public_id)
 
+    # receive coin target
     parser_receive_coin = subparsers.add_parser('receive_coin', help='sign a transaction')
     parser_receive_coin.add_argument('transaction', action='store',
                                      help='half transaction file (signed by sender)')
@@ -86,6 +106,17 @@ if __name__ == "__main__":
     parser_receive_coin.add_argument('--output', action='store', default=None,
                                      help='output file for fully signed transaction')
     parser_receive_coin.set_defaults(func=receive_coin)
+
+    # initialize an empty blockchain
+    parser_init_blockchain = subparsers.add_parser('init_blockchain', help='initialize an empty blockchain')
+    parser_init_blockchain.add_argument("output", action='store', help='blockchain output file')
+    parser_init_blockchain.set_defaults(func=generate_empty_blockchain)
+
+    # submit a transaction for validation
+    parser_submit_transaction = subparsers.add_parser('submit_transaction', help='submit a transaction for validation')
+    parser_submit_transaction.add_argument("transaction", action='store', help='transaction description file')
+    parser_submit_transaction.add_argument("miner_url", action='store', help='miner url')
+    parser_submit_transaction.set_defaults(func=submit_transaction)
 
     args = parser.parse_args()
     args.func(args)
