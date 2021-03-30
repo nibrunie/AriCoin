@@ -114,6 +114,7 @@ class FullTransaction(JsonTranslatable):
                                strToBytes(ftDict["receiverSignature"]))
 
 class OpenBlock(JsonTranslatable):
+    closed = False
     """ on-going block gathering multiple transactions without having being
         closed nor signed yet """
     def __init__(self, blockId, previousBlockSignature, transactionList=None):
@@ -128,7 +129,7 @@ class OpenBlock(JsonTranslatable):
         return {
             "type": "OpenBlock",
             "blockId": self.blockId,
-            "previousBlockSignature": self.previousBlockSignature,
+            "previousBlockSignature": bytesToStr(self.previousBlockSignature),
             "transactionList": [t.dictExport() for t in self.transactionList],
         }
 
@@ -155,16 +156,21 @@ class OpenBlock(JsonTranslatable):
     def dictImport(obDict):
         assert obDict["type"] in ["ClosedBlock", "OpenBlock"]
         return OpenBlock(obDict["blockId"],
-                         obDict["previousBlockSignature"],
+                         strToBytes(obDict["previousBlockSignature"]),
                          [FullTransaction.dictImport(t) for t in obDict["transactionList"]])
 
 class ClosedBlock(JsonTranslatable):
     """ Signed block from the blockchain """
+    closed = True
     def __init__(self, block, validatorSignature, blockSignature, challengeResponse):
         self.block = block
         self.validatorSignature = validatorSignature
         self.blockSignature = blockSignature
         self.challengeResponse = challengeResponse
+
+    @property
+    def blockId(self):
+        return self.block.blockId
 
     def dictExport(self):
         transcript = self.block.dictExport()
@@ -207,12 +213,19 @@ class ClosedBlock(JsonTranslatable):
 class BlockChain(JsonTranslatable):
     """ Block-chain component """
     VALIDATOR_REWARD = 1
-    def __init__(self, blockList=None):
-        self.rootDigest = 0x1337
+    def __init__(self, blockList=None, lastOpenBlock=None):
+        self.rootDigest = b'1337'
+        # list of closed block
         self.blockList = [] if blockList is None else blockList
+        # top of stack (open) block
+        self.lastOpenBlock = OpenBlock(0, self.rootDigest) if lastOpenBlock is None else lastOpenBlock
 
-    def addBlock(self, newBlock):
-        self.blockList.append(newBlock)
+    def closeBlock(self, validatorSignature, blockSignature, challengeReponse):
+        """ add a closed block to the list """
+        lastBlock = self.lastOpenBlock.closeBlock(validatorSignature, blockSignature, challengeReponse)
+        self.blockList.append(lastBlock)
+        # creating a new and open last block
+        self.lastOpenBlock = OpenBlock(lastBlock.blockId + 1, lastBlock.blockSignature)
 
     def verifyChain(self):
         previousSignature = self.rootDigest
@@ -224,19 +237,21 @@ class BlockChain(JsonTranslatable):
             if not closedBlock.verify(walletMap, closedBlock.validatorSignature):
                 print(f"[ERROR] block {index} could not be verified")
                 return False
+            # copying current signature for next block check
+            previousSignature = closedBlock.blockSignature
         return True
 
     def dictExport(self):
         return {
             "type": "BlockChain",
-            "rootDigest": self.rootDigest,
+            "rootDigest": bytesToStr(self.rootDigest),
             "blockList": [b.dictExport() for b in self.blockList]
         }
 
     @staticmethod
     def dictImport(bcDict):
         assert bcDict["type"] == "BlockChain"
-        assert bcDict["rootDigest"] == 0x1337
+        assert strToBytes(bcDict["rootDigest"]) == b'1337'
         # TODO factorize rootDigest constant
         return BlockChain(blockList=[ClosedBlock.dictImport(cb) for cb in bcDict["blockList"]])
 
@@ -371,10 +386,11 @@ if __name__ == "__main__":
     aricCoinChain = BlockChain()
     print(f"aricCoin init wallets: {aricCoinChain.countCoins().items()}")
 
-    firstBlock = OpenBlock(0, aricCoinChain.rootDigest)
-    firstBlock.addTransaction(fullNewTransaction)
+    aricCoinChain.lastOpenBlock.addTransaction(fullNewTransaction)
     # alice is signing the first block
-    aricCoinChain.addBlock(firstBlock.closeBlock(alice.id, firstBlock.signBlock(alice), firstBlock.blockChallenge.solve()))
+    aricCoinChain.closeBlock(alice.id,
+                             aricCoinChain.lastOpenBlock.signBlock(alice),
+                             aricCoinChain.lastOpenBlock.blockChallenge.solve())
 
     print(f"aricCoin after one transaction wallets: {aricCoinChain.countCoins().items()}")
     print("verifying chain")
