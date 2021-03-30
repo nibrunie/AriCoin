@@ -32,10 +32,9 @@ class RootController(TGController):
 
     def closeBlock(self):
         lastBlock = self.blockChain.lastOpenBlock
-        closedBlock = lastBlock.closeBlock(self.miner.id,
-                                           lastBlock.signBlock(self.miner),
-                                           lastBlock.blockChallenge.solve())
-        self.blockChain.addBlock(closedBlock)
+        self.blockChain.closeBlock(self.miner.id,
+                                   lastBlock.signBlock(self.miner),
+                                   lastBlock.blockChallenge.solve())
 
     @expose(content_type="text/plain")
     def index(self):
