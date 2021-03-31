@@ -154,7 +154,8 @@ class OpenBlock(JsonTranslatable):
     def blockChallenge(self):
         """ build a Challenge specific to this block """
         hexDigest = int(self.blockDigest, base=16)
-        startInput = mpmath.mpf(hexDigest % 2**53 -1) * 2.0**-50
+        with mpmath.workprec(53):
+            startInput = mpmath.mpf(hexDigest % 2**53 -1) * 2.0**-50
         funcTag = list(FUNC_MAP.keys())[hexDigest % len(FUNC_MAP)]
         return Challenge(startInput=startInput, funcTag=funcTag)
 
@@ -371,22 +372,26 @@ class Challenge(JsonTranslatable):
         )
 
     def solve(self, watchdog=1000000):
-        localInput = self.startInput if not self.startInput is None else mpmath.mpf(random.random())
-        for _ in range(watchdog):
-            roundedValue, delta = self.delta(localInput)
-            if delta < self.bound:
-                return ChallengeResponse(self, localInput, roundedValue)
-            localInput = localInput + localInput * 2.0**-53 # bigfloat.next_up(localInput, context=self.roundedFormat)
-        return None
+        mpmath.mp.prec = 53
+        with mpmath.workprec(53):
+            localInput = self.startInput if not self.startInput is None else mpmath.mpf(random.random())
+            for _ in range(watchdog):
+                roundedValue, delta = self.delta(localInput)
+                if mpmath.mpf(delta) < mpmath.mpf(self.bound):
+                    return ChallengeResponse(self, float(localInput), roundedValue)
+                with mpmath.workprec(53):
+                    localInput = localInput + localInput * 2.0**-50 # bigfloat.next_up(localInput, context=self.roundedFormat)
+                localInput = mpmath.mpf(float(localInput))
+            return None
 
     def delta(self, localInput):
-        with mpmath.workprec(self.roundedFormat):
+        with mpmath.workprec(53):
             roundedValue = self.func(localInput)
-        with mpmath.workprec(self.extendedFormat):
+        with mpmath.workprec(106):
             extendedValue = self.func(localInput)
         #roundedValue = self.func(localInput, context=self.roundedFormat)
         #extendedValue = self.func(localInput, context=self.extendedFormat)
-            delta = abs(extendedValue - roundedValue) / roundedValue
+            delta = abs((extendedValue - roundedValue) / roundedValue)
             return roundedValue, delta
 
     def checkResponse(self, response: mpmath.mp):
