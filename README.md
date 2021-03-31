@@ -1,5 +1,5 @@
 # AriCoin
-Crypto currency with useful proof of work: listing hardest to round cases
+Crypto currency with useful proof of work: Table Maker Dilemna, listing hardest to round cases
 
 
 # Introduction
@@ -26,6 +26,7 @@ python3 aricoin.py generate_wallet --output <output file>
 
 You can extract a public id from a private wallet:
 ```
+python3 aricoin.py generate_public_id <private wallet file> <public id output file>
 ```
 
 ## Sending and Receiving coins
@@ -69,6 +70,10 @@ python3 launch_miner.py [--port <server port>] [--load-blockchain <saved blockha
 ```
 
 By default the server will be accessible at `http://localhost:8080`, the blockchain can be inspected at `http://localhost:8080/blockchain` and a list a solved TMD challenges extracted from the blockchain is available at `http://localhost:8080/tmd`
+
+# History
+
+- Proof of concept released on April 1st, 2021
 
 # References
 - Jean-Michel Muller's page on the TMD: http://perso.ens-lyon.fr/jean-michel.muller/Intro-to-TMD.htm
