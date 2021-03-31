@@ -13,7 +13,7 @@ from core.utils import JsonTranslatable, strToBytes, bytesToStr
 class UnsignedTransaction(JsonTranslatable):
     """ Transaction of <amount> coin between sender and receiver signed
         by neither sender nor receiver """
-    def __init__(self, sender, receiver, amount, nonce=None):
+    def __init__(self, sender, receiver, amount: int, nonce=None):
         self.sender = sender
         self.receiver = receiver
         self.amount = amount
@@ -25,7 +25,7 @@ class UnsignedTransaction(JsonTranslatable):
             "type": "UnsignedTransaction",
             "sender": bytesToStr(self.sender),
             "receiver": bytesToStr(self.receiver),
-            "amount": self.amount,
+            "amount": str(self.amount),
             "nonce": bytesToStr(self.nonce)
         }
 
@@ -34,7 +34,7 @@ class UnsignedTransaction(JsonTranslatable):
         assert utDict["type"] in ["UnsignedTransaction", "HalfTransaction", "FullTransaction"]
         return UnsignedTransaction(strToBytes(utDict["sender"]),
                                    strToBytes(utDict["receiver"]),
-                                   utDict["amount"],
+                                   int(utDict["amount"]),
                                    nonce=strToBytes(utDict["nonce"]))
 
     def sign(self, privateWallet):
