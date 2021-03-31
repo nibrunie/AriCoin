@@ -13,6 +13,9 @@ if __name__ == "__main__":
     parser.add_argument("--miner-id", action="store", type=str,
                         default=None,
                         help="miner identity file (private id)")
+    parser.add_argument("--port", action="store", type=int,
+                        default=8080,
+                        help="server port")
 
     args = parser.parse_args()
 
@@ -23,6 +26,6 @@ if __name__ == "__main__":
     })
 
     # Serve the newly configured web application.
-    print("Serving on port 8080...")
-    httpd = make_server('', 8080, config.make_wsgi_app())
+    print(f"Serving on port {args.port} ...")
+    httpd = make_server('', args.port, config.make_wsgi_app())
     httpd.serve_forever()
