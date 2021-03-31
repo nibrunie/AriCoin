@@ -15,6 +15,61 @@ Contrary to must crypto-currencies the proof-of-work challenges.
 
 # How to use ariCoin
 
+AriCoin is delivered with an utility called `aricoin` which performs most of the basis actions.
+
+## Creating a wallet
+
+To create a wallet (private):
+```
+python3 aricoin.py generate_wallet --output <output file>
+```
+
+You can extract a public id from a private wallet:
+```
+```
+
+## Sending and Receiving coins
+
+AriCoin uses 2-sided transactions: first the sender creates an half transaction as follows:
+
+```
+python aricoin.py transfer_coin <receiver public id file> <amoun> --wallet <sender private wallet file> --output <half transaction output file>
+```
+
+then the receiver must sign this half transaction before it can be submitted to a validator
+
+```
+python3 aricoin.py receive_coin --wallet <receiver private wallet> --output <output signed transaction file> <input half transaction file>
+```
+
+## Submitting a transaction to a validator
+
+A transaction must be submitted to a validator to be recorded in the blockchain.
+
+```
+python3 aricoin.py submit_transaction <transaction file> <validtor URL>
+```
+
+## Initializing a blockchain
+
+The `aricoin` utility can be used to initialize an empty blockchain.
+
+```
+python3 aricoin.py init_blockchain <blockchain file>
+```
+
+# Miner/Validator
+
+This repo also contains the source code for an AriCoin validator/miner.
+
+## Launching a validator
+
+```
+python3 launch_miner.py [--port <server port>] [--load-blockchain <saved blockhain>] [--miner-id <miner private wallet>]
+```
+
+By default the server will be accessible at `http://localhost:8080`, the blockchain can be inspected at `http://localhost:8080/blockchain` and a list a solved TMD challenges extracted from the blockchain is available at `http://localhost:8080/tmd`
+
 # References
 - Jean-Michel Muller's page on the TMD: http://perso.ens-lyon.fr/jean-michel.muller/Intro-to-TMD.htm
 - Slides by Vincent Lefevre: http://www.vinc17.net/research/slides/tamadi2010-10.pdf
