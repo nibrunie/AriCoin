@@ -50,7 +50,7 @@ class RootController(TGController):
         for block in self.blockChain.blockList:
             challenge = block.challengeResponse
             desc = challenge.challenge.staticDict
-            text += (f"|{desc['func']}_rnd{desc['roundedPrecision']}({challenge.response}) - {challenge.responseImage}| <= {desc['bound']}\n")
+            text += (f"|{desc['funcTag']}_rnd{desc['roundedPrecision']}({challenge.response}) - {challenge.responseImage}| <= {desc['bound']}\n")
         return text
 
     @expose(content_type="text/json")
