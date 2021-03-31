@@ -29,12 +29,14 @@ You can extract a public id from a private wallet:
 python3 aricoin.py generate_public_id <private wallet file> <public id output file>
 ```
 
+The public id file can be shared openly, it will be used by other coin owner to send you currencies.
+
 ## Sending and Receiving coins
 
 AriCoin uses 2-sided transactions: first the sender creates an half transaction as follows:
 
 ```
-python aricoin.py transfer_coin <receiver public id file> <amoun> --wallet <sender private wallet file> --output <half transaction output file>
+python3 aricoin.py transfer_coin <receiver public id file> <amoun> --wallet <sender private wallet file> --output <half transaction output file>
 ```
 
 then the receiver must sign this half transaction before it can be submitted to a validator
