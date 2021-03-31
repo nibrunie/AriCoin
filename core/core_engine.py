@@ -1,5 +1,5 @@
 import ecdsa
-import bigfloat
+import mpmath
 import random
 import json
 import hashlib
@@ -154,7 +154,7 @@ class OpenBlock(JsonTranslatable):
     def blockChallenge(self):
         """ build a Challenge specific to this block """
         hexDigest = int(self.blockDigest, base=16)
-        startInput = bigfloat.BigFloat(hexDigest % 2**53 -1) * 2.0**-50
+        startInput = mpmath.mpf(hexDigest % 2**53 -1) * 2.0**-50
         funcTag = list(FUNC_MAP.keys())[hexDigest % len(FUNC_MAP)]
         return Challenge(startInput=startInput, funcTag=funcTag)
 
@@ -317,12 +317,12 @@ class BlockChain(JsonTranslatable):
         return walletMap
 
 FUNC_MAP = {
-    "exp2": bigfloat.exp2,
-    "tanh": bigfloat.tanh,
-    "exp": bigfloat.exp,
-    "cos": bigfloat.cos,
-    "sin": bigfloat.sin,
-    "tan": bigfloat.tan,
+    # "exp2": mpmath.exp2,
+    "tanh": mpmath.tanh,
+    "exp": mpmath.exp,
+    "cos": mpmath.cos,
+    "sin": mpmath.sin,
+    "tan": mpmath.tan,
 }
 
 def randomFuncTag():
@@ -333,7 +333,7 @@ REVERSE_FUNC_MAP = dict((FUNC_MAP[k], k) for k in FUNC_MAP)
 class Challenge(JsonTranslatable):
     """ Hardest-to-round cases for arbitrary function, precision and bound """
     def __init__(self,
-                 funcTag="exp2",
+                 funcTag="exp",
                  bound=2.0**-60,
                  startInput=None,
                  roundedPrecision=53,
@@ -346,9 +346,9 @@ class Challenge(JsonTranslatable):
         # target upper bound on the error
         self.bound = bound
         # destination format
-        self.roundedFormat = bigfloat.precision(roundedPrecision)
+        self.roundedFormat = roundedPrecision
         # arbitrary-precision format
-        self.extendedFormat = bigfloat.precision(extendedPrecision)
+        self.extendedFormat = extendedPrecision
         self.staticDict = {
             "type": "Challenge",
             "bound": bound,
@@ -371,21 +371,25 @@ class Challenge(JsonTranslatable):
         )
 
     def solve(self, watchdog=1000000):
-        localInput = self.startInput if not self.startInput is None else bigfloat.BigFloat(random.random())
+        localInput = self.startInput if not self.startInput is None else mpmath.mpf(random.random())
         for _ in range(watchdog):
             roundedValue, delta = self.delta(localInput)
             if delta < self.bound:
                 return ChallengeResponse(self, localInput, roundedValue)
-            localInput = bigfloat.next_up(localInput, context=self.roundedFormat)
+            localInput = localInput + localInput * 2.0**-53 # bigfloat.next_up(localInput, context=self.roundedFormat)
         return None
 
     def delta(self, localInput):
-        roundedValue = self.func(localInput, context=self.roundedFormat)
-        extendedValue = self.func(localInput, context=self.extendedFormat)
-        delta = abs(extendedValue - roundedValue) / roundedValue
-        return roundedValue, delta
+        with mpmath.workprec(self.roundedFormat):
+            roundedValue = self.func(localInput)
+        with mpmath.workprec(self.extendedFormat):
+            extendedValue = self.func(localInput)
+        #roundedValue = self.func(localInput, context=self.roundedFormat)
+        #extendedValue = self.func(localInput, context=self.extendedFormat)
+            delta = abs(extendedValue - roundedValue) / roundedValue
+            return roundedValue, delta
 
-    def checkResponse(self, response: bigfloat.BigFloat):
+    def checkResponse(self, response: mpmath.mp):
         roundedValue, delta = self.delta(response)
         return delta < self.bound
 
@@ -407,9 +411,13 @@ class ChallengeResponse(JsonTranslatable):
     @staticmethod
     def dictImport(crDict):
         # TODO/FIXME: response precision should be parametrizable
+        with mpmath.workprec(53):
+            response = mpmath.mpf(crDict["response"])
+            responseImage = mpmath.mpf(crDict["responseImage"])
         return ChallengeResponse(Challenge.dictImport(crDict),
-                                 bigfloat.BigFloat(crDict["response"], context=bigfloat.precision(53)),
-                                 bigfloat.BigFloat(crDict["responseImage"], context=bigfloat.precision(53)))
+                                 response, responseImage)
+                                 # bigfloat.BigFloat(crDict["response"], context=bigfloat.precision(53)),
+                                 # bigfloat.BigFloat(crDict["responseImage"], context=bigfloat.precision(53)))
 
 
 if __name__ == "__main__":

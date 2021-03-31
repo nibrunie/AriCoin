@@ -1,4 +1,4 @@
 ecdsa[gmpy2]
-bigfloat
+mpmath
 TurboGears2
 requests
