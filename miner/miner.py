@@ -2,22 +2,29 @@ from tg import expose, TGController
 import ecdsa
 
 from core.core_engine import BlockChain, FullTransaction
+import core.core_engine as core_engine
 from core.wallet import Wallet, PublicWallet
 from core.utils import strToBytes
 
 class RootController(TGController):
-    def __init__(self, blockChainFile, minerId):
+    def __init__(self, blockChainFile=None, minerId=None):
         super().__init__()
         # local blockchain
         self.blockChain = None
         # miner identify (private), used to sign blocks
         self.miner = None
-        with open(blockChainFile, "r") as blockChainStream:
-            self.blockChain = BlockChain.jsonImport(blockChainStream.read())
-            chainCheck = self.blockChain.verifyChain()
-            assert chainCheck, "loaded blockchain could not be verified"
-        with open(minerId, "r") as minerIdStream:
-            self.miner = Wallet.jsonImport(minerIdStream.read())
+        if blockChainFile is None:
+            self.blockChain = BlockChain()
+        else:
+            with open(blockChainFile, "r") as blockChainStream:
+                self.blockChain = BlockChain.jsonImport(blockChainStream.read())
+                chainCheck = self.blockChain.verifyChain()
+                assert chainCheck, "loaded blockchain could not be verified"
+        if minerId is None:
+            self.miner = Wallet.generateNewWallet()
+        else:
+            with open(minerId, "r") as minerIdStream:
+                self.miner = Wallet.jsonImport(minerIdStream.read())
         self.publicWallet = {}
 
     def getPublicWallet(self, publicId):
@@ -26,9 +33,12 @@ class RootController(TGController):
         return self.publicWallet[publicId]
 
     def addTransaction(self, newTransaction):
-        self.blockChain.lastOpenBlock.addTransaction(newTransaction)
+        check = self.blockChain.addTransaction(newTransaction)
+        if not check:
+            return False
         # temporary: closing a block after each transaction
         self.closeBlock()
+        return True
 
     def closeBlock(self):
         lastBlock = self.blockChain.lastOpenBlock
@@ -58,14 +68,16 @@ class RootController(TGController):
                       receiver=None,
                       amount=None,
                       senderSignature=None,
-                      receiverSignature=None):
+                      receiverSignature=None,
+                      nonce=None):
         transaction = FullTransaction.dictImport({
             "type": "FullTransaction",
             "receiverSignature": receiverSignature,
             "senderSignature": senderSignature,
             "sender": sender,
             "receiver": receiver,
-            "amount": amount
+            "amount": amount,
+            "nonce": nonce
         })
         # checking transaction
         senderWallet = self.getPublicWallet(sender)
@@ -75,5 +87,15 @@ class RootController(TGController):
         except ecdsa.keys.BadSignatureError:
             return f"transaction signature could not be verified: {transaction.jsonExport()}"
         else:
-            self.addTransaction(transaction)
-            return "transaction verified"
+            try:
+                check = self.addTransaction(transaction)
+            except core_engine.DuplicateTransaction:
+                return "invalid transaction: duplicate"
+            except core_engine.InsufficientResource:
+                return "invalid transaction: not enough resources"
+            except core_engine.InvalidTransactionAmount:
+                return "invalid transaction"
+            if check:
+                return "transaction verified"
+            else:
+                return "transaction could not be verified"

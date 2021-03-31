@@ -53,6 +53,9 @@ class TestBlockChain:
                                       lastOpenBlock.blockChallenge.solve())
         assert self.aricCoinChain.verifyChain()
 
+    def test_block_three(self):
+        assert self.aricCoinChain.addTransaction(self.transaction)
+
     def test_verify_chain(self):
         assert self.aricCoinChain.verifyChain()
 

@@ -222,6 +222,10 @@ class ClosedBlock(JsonTranslatable):
         print(f"validSignature={validSignature}, validResponse={validResponse}")
         return validSignature and validResponse
 
+class InsufficientResource(Exception): pass
+class DuplicateTransaction(Exception): pass
+class InvalidTransactionAmount(Exception): pass
+
 class BlockChain(JsonTranslatable):
     """ Block-chain component """
     VALIDATOR_REWARD = 1
@@ -231,10 +235,42 @@ class BlockChain(JsonTranslatable):
         self.blockList = [] if blockList is None else blockList
         # top of stack (open) block
         self.lastOpenBlock = OpenBlock(0, self.rootDigest) if lastOpenBlock is None else lastOpenBlock
+        # set of already encountered nonce
+        self.nonceSet = set()
+        self.coinCountMap = self.countCoins()
+
+    def checkTransaction(self, newTransaction):
+        # check positivity
+        if newTransaction.amount < 0:
+            raise InvalidTransactionAmount 
+            return False
+        # check unicity
+        if newTransaction.nonce in self.nonceSet:
+            raise DuplicateTransaction
+            return False
+        # check resources
+        sufficientAmount = self.coinCountMap[newTransaction.sender] >= newTransaction.amount 
+        if not sufficientAmount:
+            raise InsufficientResource
+            return False
+        return True
+
+    def addTransaction(self, newTransaction):
+        transactionCheck = self.checkTransaction(newTransaction)
+        if transactionCheck:
+            # commiting transaction
+            self.nonceSet.add(newTransaction.nonce)
+            self.coinCountMap[newTransaction.sender] -= newTransaction.amount
+            self.coinCountMap[newTransaction.receiver] += newTransaction.amount
+            self.lastOpenBlock.addTransaction(newTransaction)
+            return True
+        return False
 
     def closeBlock(self, validatorSignature, blockSignature, challengeResponse):
         """ add a closed block to the list """
         lastBlock = self.lastOpenBlock.closeBlock(validatorSignature, blockSignature, challengeResponse)
+
+        self.coinCountMap[validatorSignature] += BlockChain.VALIDATOR_REWARD
         self.blockList.append(lastBlock)
         # creating a new and open last block
         self.lastOpenBlock = OpenBlock(lastBlock.blockId + 1, lastBlock.blockSignature)
@@ -246,7 +282,11 @@ class BlockChain(JsonTranslatable):
             if not closedBlock.block.previousBlockSignature == previousSignature:
                 print(f"[ERROR] block {index} previousSignature mismatch")
                 return False
-            if not closedBlock.verify(walletMap, closedBlock.validatorSignature):
+            try:
+                signatureCheck = closedBlock.verify(walletMap, closedBlock.validatorSignature)
+            except ecdsa.keys.BadSignatureError:
+                signatureCheck = False
+            if not signatureCheck:
                 print(f"[ERROR] block {index} could not be verified")
                 return False
             # copying current signature for next block check
