@@ -4,6 +4,7 @@ import random
 import json
 import hashlib
 import collections
+import secrets
 
 from core.wallet import PublicWallet, Wallet
 from core.utils import JsonTranslatable, strToBytes, bytesToStr
@@ -12,17 +13,20 @@ from core.utils import JsonTranslatable, strToBytes, bytesToStr
 class UnsignedTransaction(JsonTranslatable):
     """ Transaction of <amount> coin between sender and receiver signed
         by neither sender nor receiver """
-    def __init__(self, sender, receiver, amount):
+    def __init__(self, sender, receiver, amount, nonce=None):
         self.sender = sender
         self.receiver = receiver
         self.amount = amount
+        # random nonce to uniquify the transaction
+        self.nonce = secrets.token_bytes(16) if nonce is None else nonce 
 
     def dictExport(self):
         return {
             "type": "UnsignedTransaction",
             "sender": bytesToStr(self.sender),
             "receiver": bytesToStr(self.receiver),
-            "amount": self.amount
+            "amount": self.amount,
+            "nonce": bytesToStr(self.nonce)
         }
 
     @staticmethod
@@ -30,7 +34,8 @@ class UnsignedTransaction(JsonTranslatable):
         assert utDict["type"] in ["UnsignedTransaction", "HalfTransaction", "FullTransaction"]
         return UnsignedTransaction(strToBytes(utDict["sender"]),
                                    strToBytes(utDict["receiver"]),
-                                   utDict["amount"])
+                                   utDict["amount"],
+                                   nonce=strToBytes(utDict["nonce"]))
 
     def sign(self, privateWallet):
         transcript = bytes(self.jsonExport(), encoding='utf8')
@@ -70,6 +75,9 @@ class HalfTransaction(JsonTranslatable):
     @property
     def amount(self):
         return self.unsignedTransaction.amount
+    @property
+    def nonce(self):
+        return self.unsignedTransaction.nonce
 
     @staticmethod
     def dictImport(htDict):
@@ -93,6 +101,9 @@ class FullTransaction(JsonTranslatable):
     @property
     def amount(self):
         return self.halfTransaction.amount
+    @property
+    def nonce(self):
+        return self.halfTransaction.nonce
 
     def dictExport(self):
         dictTranscript = self.halfTransaction.dictExport()
