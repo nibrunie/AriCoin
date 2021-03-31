@@ -155,7 +155,8 @@ class OpenBlock(JsonTranslatable):
         """ build a Challenge specific to this block """
         hexDigest = int(self.blockDigest, base=16)
         startInput = bigfloat.BigFloat(hexDigest % 2**53 -1) * 2.0**-50
-        return Challenge(startInput=startInput)
+        funcTag = list(FUNC_MAP.keys())[hexDigest % len(FUNC_MAP)]
+        return Challenge(startInput=startInput, funcTag=funcTag)
 
     def signBlock(self, validatorPrivateWallet):
         return validatorPrivateWallet.sign(bytes(self.blockDigest, encoding='utf8'))
@@ -276,22 +277,30 @@ class BlockChain(JsonTranslatable):
         return walletMap
 
 FUNC_MAP = {
-    "exp2": bigfloat.exp2
+    "exp2": bigfloat.exp2,
+    "tanh": bigfloat.tanh,
+    "exp": bigfloat.exp,
+    "cos": bigfloat.cos,
+    "sin": bigfloat.sin,
+    "tan": bigfloat.tan,
 }
+
+def randomFuncTag():
+    return random.choices(FUNC_MAP.keys())
 
 REVERSE_FUNC_MAP = dict((FUNC_MAP[k], k) for k in FUNC_MAP)
 
 class Challenge(JsonTranslatable):
     """ Hardest-to-round cases for arbitrary function, precision and bound """
     def __init__(self,
-                 func=bigfloat.exp2,
+                 funcTag="exp2",
                  bound=2.0**-60,
                  startInput=None,
                  roundedPrecision=53,
                  extendedPrecision=106):
 
         # considered function
-        self.func = func
+        self.func = FUNC_MAP[funcTag]
         # input to start with when looking for hardest to round cases
         self.startInput = startInput
         # target upper bound on the error
@@ -305,7 +314,7 @@ class Challenge(JsonTranslatable):
             "bound": bound,
             "roundedPrecision": roundedPrecision,
             "extendedPrecision": extendedPrecision,
-            "func": REVERSE_FUNC_MAP[func],
+            "funcTag": funcTag,
         }
 
     def dictExport(self):
@@ -315,7 +324,7 @@ class Challenge(JsonTranslatable):
     def dictImport(cDict):
         assert cDict["type"] in ["Challenge", "ChallengeResponse"]
         return Challenge(
-            func=FUNC_MAP[cDict["func"]],
+            funcTag=cDict["funcTag"],
             bound=float(cDict["bound"]),
             roundedPrecision=int(cDict["roundedPrecision"]),
             extendedPrecision=int(cDict["extendedPrecision"])
